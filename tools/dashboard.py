@@ -105,6 +105,10 @@ CLIENTS = {
         "msg_keywords":  ["ENGJ"],
         "lead_keywords": ["LEAD"],
         "leads_first": True,
+        "metas_cursos": {
+            "The Art Full Face": 4,
+            "Endolaser Gabi":    4,
+        },
     },
 }
 
@@ -854,16 +858,26 @@ _tipo_cliente = client_cfg.get("tipo", "clinica_geral")
 
 if _tipo_cliente == "mensagens":
     tab1, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📈 Evolução"])
-    tab2 = tab3 = tab4 = tab_lead = None
+    tab2 = tab3 = tab4 = tab_lead = tab_metas = None
 elif _tipo_cliente == "mensagens_lead":
+    _has_metas = bool(client_cfg.get("metas_cursos"))
     if client_cfg.get("leads_first", False):
-        tab_lead, tab1, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "📈 Evolução"])
+        if _has_metas:
+            tab_lead, tab1, tab_metas, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "🎯 Metas", "📈 Evolução"])
+        else:
+            tab_lead, tab1, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "📈 Evolução"])
+            tab_metas = None
     else:
-        tab1, tab_lead, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "📈 Evolução"])
+        if _has_metas:
+            tab1, tab_lead, tab_metas, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "🎯 Metas", "📈 Evolução"])
+        else:
+            tab1, tab_lead, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "📈 Evolução"])
+            tab_metas = None
     tab2 = tab3 = tab4 = None
 else:
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "👥 Seguidores · E1-DIST", "📊 Funil Completo", "🎯 Metas", "📈 Evolução"])
     tab_lead = None
+    tab_metas = None
 
 # ══ TAB 1 — MENSAGENS ═════════════════════════════════════════════════════════
 
@@ -1198,6 +1212,68 @@ if tab_lead is not None:
             dl_out["Leads"]            = daily_lead["Leads"].apply(fmt_num)
             dl_out["CPL"]              = daily_lead["CPL"].apply(lambda v: fmt_brl(v) if v is not None else "—")
             st.markdown(_tabela_campanha_html(dl_out.set_index("Dia"), first_col="DIA"), unsafe_allow_html=True)
+
+# ══ TAB METAS — METAS POR CURSO ══════════════════════════════════════════════
+
+if tab_metas is not None:
+    with tab_metas:
+        metas_cursos = client_cfg.get("metas_cursos", {})
+
+        df_lead_m = df_lead.copy()
+        df_lead_m["lead_count"] = df_lead_m["actions"].apply(
+            lambda x: extract_action(x, "onsite_conversion.lead_grouped")
+                   or extract_action(x, "offsite_conversion.fb_pixel_lead")
+                   or extract_action(x, "lead")
+        )
+        df_lead_m["curso"] = df_lead_m["campaign_name"].apply(
+            lambda n: n.split("|")[-1].strip() if "|" in n else n.strip()
+        )
+        leads_por_curso = (
+            df_lead_m.groupby("curso")
+            .agg(leads=("lead_count", "sum"), spend=("spend", "sum"))
+            .reset_index()
+        )
+
+        st.markdown('<div style="font-size:13px;color:#3d4466;margin-bottom:20px">Leads captados vs meta de alunos · Período selecionado</div>', unsafe_allow_html=True)
+
+        for curso, meta in metas_cursos.items():
+            row = leads_por_curso[leads_por_curso["curso"].str.lower() == curso.lower()]
+            leads = int(row["leads"].sum()) if not row.empty else 0
+            spend = float(row["spend"].sum()) if not row.empty else 0.0
+            pct   = min(leads / meta * 100, 100) if meta > 0 else 0
+            cpl   = spend * TAX_MULTIPLIER / leads if leads > 0 else None
+            faltam = max(meta - leads, 0)
+
+            bar_color = "#00e676" if pct >= 80 else ("#ffd600" if pct >= 50 else "#00d4ff")
+            badge_cls = "up" if pct >= 80 else ("warn" if pct >= 50 else "ok")
+
+            cpl_html = (
+                f'<div><div class="kpi-label">CPL</div>'
+                f'<div style="font-size:22px;font-weight:900;color:#a78bfa">{fmt_brl(cpl)}</div></div>'
+            ) if cpl else ""
+
+            st.markdown(
+                f'<div style="background:#0f1120;border:1px solid #1e2235;border-radius:12px;padding:22px 24px;margin-bottom:14px">'
+                f'  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+                f'    <div style="font-size:17px;font-weight:800;color:#e0e4f0">{curso}</div>'
+                f'    <span class="badge {badge_cls}">{pct:.0f}% da meta</span>'
+                f'  </div>'
+                f'  <div style="display:flex;gap:36px;margin-bottom:16px">'
+                f'    <div><div class="kpi-label">Leads</div><div style="font-size:26px;font-weight:900;color:#00d4ff">{leads}</div></div>'
+                f'    <div><div class="kpi-label">Meta</div><div style="font-size:26px;font-weight:900;color:#e0e4f0">{meta} alunos</div></div>'
+                f'    <div><div class="kpi-label">Faltam</div><div style="font-size:26px;font-weight:900;color:#ffd600">{faltam}</div></div>'
+                f'    {cpl_html}'
+                f'  </div>'
+                f'  <div style="background:#161829;border-radius:4px;height:7px;overflow:hidden">'
+                f'    <div style="width:{pct:.1f}%;height:100%;background:{bar_color};border-radius:4px"></div>'
+                f'  </div>'
+                f'  <div style="display:flex;justify-content:space-between;margin-top:6px">'
+                f'    <div style="font-size:10px;color:#3d4466">{leads} leads captados</div>'
+                f'    <div style="font-size:10px;color:#3d4466">Meta: {meta} alunos</div>'
+                f'  </div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
 
 # ══ TAB 2 — SEGUIDORES ════════════════════════════════════════════════════════
 
