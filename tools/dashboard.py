@@ -97,10 +97,18 @@ MONTH_TAB = {
 }
 
 CLIENTS = {
-    # Clientes adicionados via /setup-meta-dashboard
+    "CA - Instituto Master Beauty": {
+        "account_id": "act_400205609739120",
+        "spreadsheet_id": None,
+        "agendamentos_id": None,
+        "tipo": "mensagens_lead",
+        "msg_keywords":  ["ENGJ"],
+        "lead_keywords": ["LEAD"],
+        "leads_first": True,
+    },
 }
 
-DEFAULT_CLIENT = None
+DEFAULT_CLIENT = "CA - Instituto Master Beauty"
 
 # ── helpers de formatação ──────────────────────────────────────────────────────
 
@@ -848,7 +856,10 @@ if _tipo_cliente == "mensagens":
     tab1, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📈 Evolução"])
     tab2 = tab3 = tab4 = tab_lead = None
 elif _tipo_cliente == "mensagens_lead":
-    tab1, tab_lead, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "📈 Evolução"])
+    if client_cfg.get("leads_first", False):
+        tab_lead, tab1, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "📈 Evolução"])
+    else:
+        tab1, tab_lead, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "📈 Evolução"])
     tab2 = tab3 = tab4 = None
 else:
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "👥 Seguidores · E1-DIST", "📊 Funil Completo", "🎯 Metas", "📈 Evolução"])
