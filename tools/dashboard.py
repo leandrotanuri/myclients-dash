@@ -858,26 +858,27 @@ _tipo_cliente = client_cfg.get("tipo", "clinica_geral")
 
 if _tipo_cliente == "mensagens":
     tab1, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📈 Evolução"])
-    tab2 = tab3 = tab4 = tab_lead = tab_metas = None
+    tab2 = tab3 = tab4 = tab_lead = tab_metas = tab_funil = None
 elif _tipo_cliente == "mensagens_lead":
     _has_metas = bool(client_cfg.get("metas_cursos"))
     if client_cfg.get("leads_first", False):
         if _has_metas:
-            tab_lead, tab1, tab_metas, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "🎯 Metas", "📈 Evolução"])
+            tab_lead, tab1, tab_funil, tab_metas, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "📊 Funil Completo", "🎯 Metas", "📈 Evolução"])
         else:
-            tab_lead, tab1, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "📈 Evolução"])
+            tab_lead, tab1, tab_funil, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "📊 Funil Completo", "📈 Evolução"])
             tab_metas = None
     else:
         if _has_metas:
-            tab1, tab_lead, tab_metas, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "🎯 Metas", "📈 Evolução"])
+            tab1, tab_lead, tab_funil, tab_metas, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "📊 Funil Completo", "🎯 Metas", "📈 Evolução"])
         else:
-            tab1, tab_lead, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "📈 Evolução"])
+            tab1, tab_lead, tab_funil, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "📊 Funil Completo", "📈 Evolução"])
             tab_metas = None
     tab2 = tab3 = tab4 = None
 else:
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "👥 Seguidores · E1-DIST", "📊 Funil Completo", "🎯 Metas", "📈 Evolução"])
     tab_lead = None
     tab_metas = None
+    tab_funil = None
 
 # ══ TAB 1 — MENSAGENS ═════════════════════════════════════════════════════════
 
@@ -1212,6 +1213,67 @@ if tab_lead is not None:
             dl_out["Leads"]            = daily_lead["Leads"].apply(fmt_num)
             dl_out["CPL"]              = daily_lead["CPL"].apply(lambda v: fmt_brl(v) if v is not None else "—")
             st.markdown(_tabela_campanha_html(dl_out.set_index("Dia"), first_col="DIA"), unsafe_allow_html=True)
+
+# ══ TAB FUNIL — FUNIL COMPLETO (mensagens_lead) ══════════════════════════════
+
+if tab_funil is not None:
+    with tab_funil:
+        df_fl = df_lead.copy()
+        df_fl["lead_count"] = df_fl["actions"].apply(
+            lambda x: extract_action(x, "onsite_conversion.lead_grouped")
+                   or extract_action(x, "offsite_conversion.fb_pixel_lead")
+                   or extract_action(x, "lead")
+        )
+        invest_liq_fl   = df_fl["spend"].sum()
+        invest_imp_fl   = invest_liq_fl * TAX_MULTIPLIER
+        total_imp_fl    = int(df_fl["impressions"].sum()) if "impressions" in df_fl.columns else 0
+        total_clk_fl    = int(df_fl["inline_link_clicks"].sum()) if "inline_link_clicks" in df_fl.columns else int(df_fl["clicks"].sum()) if "clicks" in df_fl.columns else 0
+        total_leads_fl  = int(df_fl["lead_count"].sum())
+        total_alunos_fl = client_cfg.get("total_alunos", 0)
+
+        cpm_fl   = invest_liq_fl / total_imp_fl * 1000 if total_imp_fl > 0 else 0
+        ctr_fl   = total_clk_fl / total_imp_fl * 100    if total_imp_fl > 0 else 0
+        cpc_fl   = invest_liq_fl / total_clk_fl          if total_clk_fl > 0 else 0
+        cpl_fl   = invest_imp_fl / total_leads_fl         if total_leads_fl > 0 else 0
+        tx_lead  = total_leads_fl / total_clk_fl * 100   if total_clk_fl > 0 else 0
+        custo_al = invest_imp_fl / total_alunos_fl        if total_alunos_fl > 0 else None
+
+        st.subheader("Visão Geral")
+        st.markdown(_kpi_html([
+            {"label": "Investimento Líquido",    "value": fmt_brl(invest_liq_fl), "color": "cyan"},
+            {"label": "Investimento + Impostos", "value": fmt_brl(invest_imp_fl), "color": "cyan"},
+            {"label": "CPL Real",                "value": fmt_brl(cpl_fl) if cpl_fl else "—", "color": "yellow"},
+            {"label": "Custo/Aluno",             "value": fmt_brl(custo_al) if custo_al else "—", "color": "green"},
+        ]), unsafe_allow_html=True)
+
+        st.divider()
+
+        col_funil_fl, col_metricas_fl = st.columns([1, 1])
+
+        with col_funil_fl:
+            st.markdown('<div style="font-size:13px;font-weight:700;color:#c8cce8;margin-bottom:4px">Funil de Captação</div>', unsafe_allow_html=True)
+            st.markdown(build_funnel_html(
+                ["Impressões", "Cliques", "Leads", "Alunos"],
+                [total_imp_fl, total_clk_fl, total_leads_fl, total_alunos_fl],
+                ["#00d4ff", "#7B6CF6", "#00e676", "#ffd600"],
+                [100.0, ctr_fl, tx_lead, (total_alunos_fl / total_leads_fl * 100 if total_leads_fl > 0 else None)],
+            ), unsafe_allow_html=True)
+
+        with col_metricas_fl:
+            st.markdown(
+                '<div style="font-size:12px;font-weight:700;color:#3d4466;'
+                'text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">'
+                'Métricas de Performance</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(_kpi_html([
+                {"label": "CPM",          "value": fmt_brl(cpm_fl),                        "color": "cyan",   "sub": "Custo/mil impressões"},
+                {"label": "CTR",          "value": fmt_pct(ctr_fl),                        "color": "green",  "sub": "Taxa de cliques"},
+                {"label": "CPC",          "value": fmt_brl(cpc_fl) if cpc_fl else "—",    "color": "white",  "sub": "Custo por clique"},
+                {"label": "CPL Real",     "value": fmt_brl(cpl_fl) if cpl_fl else "—",    "color": "yellow", "sub": f"▲ {total_leads_fl} leads"},
+                {"label": "TX. Lead",     "value": fmt_pct(tx_lead),                       "color": "green",  "sub": "Leads por clique"},
+                {"label": "Alunos",       "value": fmt_num(total_alunos_fl),               "color": "yellow", "sub": "Confirmados (Kommo em breve)"},
+            ], cols=2), unsafe_allow_html=True)
 
 # ══ TAB METAS — METAS POR CURSO ══════════════════════════════════════════════
 
