@@ -564,10 +564,10 @@ def _tabela_html(dt_out: pd.DataFrame, tipo_cli: str) -> str:
         f'<tbody>{"".join(rows)}</tbody></table></div>'
     )
 
-def _tabela_campanha_html(camp_out: pd.DataFrame) -> str:
+def _tabela_campanha_html(camp_out: pd.DataFrame, first_col: str = "CAMPANHA") -> str:
     """Renderiza tabela Por Campanha como HTML customizado."""
     cols = list(camp_out.columns)
-    thead = "".join(f"<th>{c.upper()}</th>" for c in ["CAMPANHA"] + cols)
+    thead = "".join(f"<th>{c.upper()}</th>" for c in [first_col] + cols)
     rows  = []
     for idx, row in camp_out.iterrows():
         name_cell = f'<td style="color:#c8cfe0;font-weight:600;max-width:320px;overflow:hidden;text-overflow:ellipsis">{idx}</td>'
@@ -1184,7 +1184,20 @@ if tab_lead is not None:
             camp_out_l["CPM"]       = camp_lead["CPM"].apply(fmt_brl)
             camp_out_l["CTR"]       = camp_lead["CTR"].apply(fmt_pct)
             camp_out_l["CPC"]       = camp_lead["CPC"].apply(lambda v: fmt_brl(v) if v is not None else "—")
-            st.dataframe(camp_out_l, use_container_width=True, hide_index=True)
+            st.markdown(_tabela_campanha_html(camp_out_l.set_index("Campanha")), unsafe_allow_html=True)
+
+            # Tabela por dia
+            st.markdown('<div style="font-size:18px;font-weight:800;color:#e0e4f0;margin:24px 0 8px">Por Dia</div>', unsafe_allow_html=True)
+            dl_imp = daily_lead["impressions"] if "impressions" in daily_lead.columns else pd.Series(0, index=daily_lead.index)
+            dl_clk = daily_lead["clicks"] if "clicks" in daily_lead.columns else pd.Series(0, index=daily_lead.index)
+            dl_out = pd.DataFrame()
+            dl_out["Dia"]              = daily_lead["date_start"].apply(lambda d: d.strftime("%d/%m") if hasattr(d, "strftime") else str(d))
+            dl_out["Invest. c/ Imp."]  = daily_lead["spend"].apply(lambda v: fmt_brl(v * TAX_MULTIPLIER))
+            dl_out["CPM"]              = (daily_lead["spend"] / dl_imp.replace(0, float("nan")) * 1000).apply(lambda v: fmt_brl(v) if pd.notna(v) else "—")
+            dl_out["CTR"]              = (dl_clk / dl_imp.replace(0, float("nan")) * 100).apply(lambda v: fmt_pct(v) if pd.notna(v) else "—")
+            dl_out["Leads"]            = daily_lead["Leads"].apply(fmt_num)
+            dl_out["CPL"]              = daily_lead["CPL"].apply(lambda v: fmt_brl(v) if v is not None else "—")
+            st.markdown(_tabela_campanha_html(dl_out.set_index("Dia"), first_col="DIA"), unsafe_allow_html=True)
 
 # ══ TAB 2 — SEGUIDORES ════════════════════════════════════════════════════════
 
