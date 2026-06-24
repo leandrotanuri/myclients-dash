@@ -114,14 +114,8 @@ CLIENTS = {
         "account_id": "act_1388498128427677",
         "spreadsheet_id": None,
         "agendamentos_id": None,
-        "tipo": "mensagens_lead",
-        "msg_keywords":  ["ENGJ"],
-        "lead_keywords": ["LEAD"],
-        "leads_first": True,
-        "metas_cursos": {
-            "The Art Full Face": 4,
-            "Endolaser Gabi":    4,
-        },
+        "meta_pacientes": 20,
+        "tipo": "tricologia",
     },
     "CA - CLINICA MASTER BEAUTY": {
         "account_id": "act_1007230201772374",
