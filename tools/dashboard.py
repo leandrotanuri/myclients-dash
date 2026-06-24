@@ -110,6 +110,32 @@ CLIENTS = {
             "Endolaser Gabi":    4,
         },
     },
+    "Dra. Roberta Esteves": {
+        "account_id": "act_1388498128427677",
+        "spreadsheet_id": None,
+        "agendamentos_id": None,
+        "tipo": "mensagens_lead",
+        "msg_keywords":  ["ENGJ"],
+        "lead_keywords": ["LEAD"],
+        "leads_first": True,
+        "metas_cursos": {
+            "The Art Full Face": 4,
+            "Endolaser Gabi":    4,
+        },
+    },
+    "CA - CLINICA MASTER BEAUTY": {
+        "account_id": "act_1007230201772374",
+        "spreadsheet_id": None,
+        "agendamentos_id": None,
+        "tipo": "mensagens_lead",
+        "msg_keywords":  ["ENGJ"],
+        "lead_keywords": ["LEAD"],
+        "leads_first": True,
+        "metas_cursos": {
+            "The Art Full Face": 4,
+            "Endolaser Gabi":    4,
+        },
+    },
 }
 
 DEFAULT_CLIENT = "CA - Instituto Master Beauty"
