@@ -676,6 +676,33 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
+def _resolve_client(name: str):
+    """Casa o nome vindo da senha/seletor com uma chave de CLIENTS,
+    tolerando diferenças de acento, maiúscula e espaços extras."""
+    if name in CLIENTS:
+        return name
+    if not name:
+        return None
+    import unicodedata
+    def _norm(s: str) -> str:
+        s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
+        return " ".join(s.lower().split())
+    alvo = _norm(name)
+    for k in CLIENTS:
+        if _norm(k) == alvo:
+            return k
+    return None
+
+_resolved = _resolve_client(client_name)
+if _resolved is None:
+    st.error(
+        f"Cliente **{client_name}** não encontrado na configuração. "
+        f"Verifique se a chave da senha nos Secrets do Streamlit é idêntica ao nome cadastrado no código. "
+        f"Clientes disponíveis: {', '.join(CLIENTS)}"
+    )
+    st.stop()
+client_name = _resolved
+
 client_cfg = CLIENTS[client_name]
 account_id = client_cfg["account_id"]
 spreadsheet_id = client_cfg.get("spreadsheet_id")
