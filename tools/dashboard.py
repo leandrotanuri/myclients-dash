@@ -127,10 +127,8 @@ CLIENTS = {
         "msg_keywords":  ["ENGJ"],
         "lead_keywords": ["LEAD"],
         "leads_first": True,
-        "metas_cursos": {
-            "The Art Full Face": 4,
-            "Endolaser Gabi":    4,
-        },
+        # Clínica (não instituto): meta de pacientes/mês, medida pelos agendamentos (col. D)
+        "meta_pacientes": 8,
     },
 }
 
@@ -967,7 +965,7 @@ if _tipo_cliente == "mensagens":
     tab1, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📈 Evolução"])
     tab2 = tab3 = tab4 = tab_lead = tab_metas = tab_funil = tab_agend = None
 elif _tipo_cliente == "mensagens_lead":
-    _has_metas = bool(client_cfg.get("metas_cursos"))
+    _has_metas = bool(client_cfg.get("metas_cursos")) or bool(client_cfg.get("meta_pacientes"))
     _has_agend = bool(client_cfg.get("agendamentos_mb_id"))
     _msg_lbl   = "💬 Mensagens · ENGJ" if client_cfg.get("leads_first", False) else "💬 Mensagens · E2-CAP"
     _specs = []
@@ -1381,21 +1379,33 @@ if tab_funil is not None:
         total_imp_fl    = int(df_fl["impressions"].sum()) if "impressions" in df_fl.columns else 0
         total_clk_fl    = int(df_fl["inline_link_clicks"].sum()) if "inline_link_clicks" in df_fl.columns else int(df_fl["clicks"].sum()) if "clicks" in df_fl.columns else 0
         total_leads_fl  = int(df_fl["lead_count"].sum())
-        total_alunos_fl = client_cfg.get("total_alunos", 0)
+
+        # Clínicas com planilha de agendamentos → última etapa do funil = Agendamentos (col. D)
+        _use_agend_fl = bool(client_cfg.get("agendamentos_mb_id"))
+        if _use_agend_fl:
+            _final_label = "Agendamentos"
+            _final_count = int(df_agend_mb["agendamentos"].sum()) if not df_agend_mb.empty else 0
+            _final_sub   = "Pacientes agendados (planilha)"
+            _custo_label = "Custo/Agendamento"
+        else:
+            _final_label = "Alunos"
+            _final_count = client_cfg.get("total_alunos", 0)
+            _final_sub   = "Confirmados (Kommo em breve)"
+            _custo_label = "Custo/Aluno"
 
         cpm_fl   = invest_liq_fl / total_imp_fl * 1000 if total_imp_fl > 0 else 0
         ctr_fl   = total_clk_fl / total_imp_fl * 100    if total_imp_fl > 0 else 0
         cpc_fl   = invest_liq_fl / total_clk_fl          if total_clk_fl > 0 else 0
         cpl_fl   = invest_imp_fl / total_leads_fl         if total_leads_fl > 0 else 0
         tx_lead  = total_leads_fl / total_clk_fl * 100   if total_clk_fl > 0 else 0
-        custo_al = invest_imp_fl / total_alunos_fl        if total_alunos_fl > 0 else None
+        custo_al = invest_imp_fl / _final_count           if _final_count > 0 else None
 
         st.subheader("Visão Geral")
         st.markdown(_kpi_html([
             {"label": "Investimento Líquido",    "value": fmt_brl(invest_liq_fl), "color": "cyan"},
             {"label": "Investimento + Impostos", "value": fmt_brl(invest_imp_fl), "color": "cyan"},
             {"label": "CPL Real",                "value": fmt_brl(cpl_fl) if cpl_fl else "—", "color": "yellow"},
-            {"label": "Custo/Aluno",             "value": fmt_brl(custo_al) if custo_al else "—", "color": "green"},
+            {"label": _custo_label,              "value": fmt_brl(custo_al) if custo_al else "—", "color": "green"},
         ]), unsafe_allow_html=True)
 
         st.divider()
@@ -1405,10 +1415,10 @@ if tab_funil is not None:
         with col_funil_fl:
             st.markdown('<div style="font-size:13px;font-weight:700;color:#c8cce8;margin-bottom:4px">Funil de Captação</div>', unsafe_allow_html=True)
             st.markdown(build_funnel_html(
-                ["Impressões", "Cliques", "Leads", "Alunos"],
-                [total_imp_fl, total_clk_fl, total_leads_fl, total_alunos_fl],
+                ["Impressões", "Cliques", "Leads", _final_label],
+                [total_imp_fl, total_clk_fl, total_leads_fl, _final_count],
                 ["#00d4ff", "#7B6CF6", "#00e676", "#ffd600"],
-                [100.0, ctr_fl, tx_lead, (total_alunos_fl / total_leads_fl * 100 if total_leads_fl > 0 else None)],
+                [100.0, ctr_fl, tx_lead, (_final_count / total_leads_fl * 100 if total_leads_fl > 0 else None)],
             ), unsafe_allow_html=True)
 
         with col_metricas_fl:
@@ -1424,7 +1434,7 @@ if tab_funil is not None:
                 {"label": "CPC",          "value": fmt_brl(cpc_fl) if cpc_fl else "—",    "color": "white",  "sub": "Custo por clique"},
                 {"label": "CPL Real",     "value": fmt_brl(cpl_fl) if cpl_fl else "—",    "color": "yellow", "sub": f"▲ {total_leads_fl} leads"},
                 {"label": "TX. Lead",     "value": fmt_pct(tx_lead),                       "color": "green",  "sub": "Leads por clique"},
-                {"label": "Alunos",       "value": fmt_num(total_alunos_fl),               "color": "yellow", "sub": "Confirmados (Kommo em breve)"},
+                {"label": _final_label,   "value": fmt_num(_final_count),                  "color": "yellow", "sub": _final_sub},
             ], cols=2), unsafe_allow_html=True)
 
 # ══ TAB METAS — METAS POR CURSO ══════════════════════════════════════════════
@@ -1433,61 +1443,124 @@ if tab_metas is not None:
     with tab_metas:
         metas_cursos = client_cfg.get("metas_cursos", {})
 
-        df_lead_m = df_lead.copy()
-        df_lead_m["lead_count"] = df_lead_m["actions"].apply(
-            lambda x: extract_action(x, "onsite_conversion.lead_grouped")
-                   or extract_action(x, "offsite_conversion.fb_pixel_lead")
-                   or extract_action(x, "lead")
-        )
-        df_lead_m["curso"] = df_lead_m["campaign_name"].apply(
-            lambda n: n.split("|")[-1].strip() if "|" in n else n.strip()
-        )
-        leads_por_curso = (
-            df_lead_m.groupby("curso")
-            .agg(leads=("lead_count", "sum"), spend=("spend", "sum"))
-            .reset_index()
-        )
+        # Modo clínica: meta de pacientes/mês (estilo PRC), medida pelos agendamentos (col. D).
+        # Só entra aqui quem NÃO tem metas por curso; o else abaixo mantém as metas por curso.
+        if not metas_cursos:
+            import calendar as _cal_m
+            from datetime import date as _date_m
+            _mes_ref   = date_start
+            _hoje_m    = _date_m.today()
+            _dias_mes  = _cal_m.monthrange(_mes_ref.year, _mes_ref.month)[1]
+            _prim_m    = _mes_ref.replace(day=1).strftime("%Y-%m-%d")
+            _ult_m     = _mes_ref.replace(day=_dias_mes).strftime("%Y-%m-%d")
+            _mes_atual = _hoje_m.year == _mes_ref.year and _hoje_m.month == _mes_ref.month
+            _dias_pass = _hoje_m.day if _mes_atual else _dias_mes
+            _dias_rest = _dias_mes - _dias_pass
+            meta_pac   = client_cfg.get("meta_pacientes", 8)
 
-        st.markdown('<div style="font-size:13px;color:#3d4466;margin-bottom:20px">Leads captados vs meta de alunos · Período selecionado</div>', unsafe_allow_html=True)
+            _agmb = client_cfg.get("agendamentos_mb_id")
+            try:
+                _dfm = fetch_agendamentos_mb(_agmb, _prim_m, _ult_m) if _agmb else pd.DataFrame()
+            except RuntimeError as _e:
+                st.warning(f"⚠️ {_e} — clique em **Atualizar Dados** na barra lateral para tentar novamente.")
+                _dfm = pd.DataFrame()
 
-        for curso, meta in metas_cursos.items():
-            row = leads_por_curso[leads_por_curso["curso"].str.lower() == curso.lower()]
-            leads = int(row["leads"].sum()) if not row.empty else 0
-            spend = float(row["spend"].sum()) if not row.empty else 0.0
-            pct   = min(leads / meta * 100, 100) if meta > 0 else 0
-            cpl   = spend * TAX_MULTIPLIER / leads if leads > 0 else None
-            faltam = max(meta - leads, 0)
-
-            bar_color = "#00e676" if pct >= 80 else ("#ffd600" if pct >= 50 else "#00d4ff")
-            badge_cls = "up" if pct >= 80 else ("warn" if pct >= 50 else "ok")
-
-            cpl_html = (
-                f'<div><div class="kpi-label">CPL</div>'
-                f'<div style="font-size:22px;font-weight:900;color:#a78bfa">{fmt_brl(cpl)}</div></div>'
-            ) if cpl else ""
+            pac_atual = int(_dfm["agendamentos"].sum()) if not _dfm.empty else 0
+            ritmo     = pac_atual / _dias_pass if _dias_pass > 0 else 0
+            proj      = round(ritmo * _dias_mes)
+            faltam    = max(meta_pac - pac_atual, 0)
+            pct       = min(pac_atual / meta_pac * 100, 100) if meta_pac > 0 else 0
+            nec       = faltam / _dias_rest if _dias_rest > 0 else 0
+            bater     = proj >= meta_pac
+            cor_txt   = "#00e676" if bater else "#ffd600"
+            status    = (f"✅ No ritmo atual ({ritmo:.1f}/dia) vai bater a meta — projeção: <b>{proj}</b> pacientes."
+                         if bater else
+                         f"⚠️ Projeção: <b>{proj}</b> pacientes. Precisa de <b>{nec:.1f}/dia</b> para bater a meta.")
 
             st.markdown(
-                f'<div style="background:#0f1120;border:1px solid #1e2235;border-radius:12px;padding:22px 24px;margin-bottom:14px">'
-                f'  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
-                f'    <div style="font-size:17px;font-weight:800;color:#e0e4f0">{curso}</div>'
-                f'    <span class="badge {badge_cls}">{pct:.0f}% da meta</span>'
-                f'  </div>'
-                f'  <div style="display:flex;gap:36px;margin-bottom:16px">'
-                f'    <div><div class="kpi-label">Leads</div><div style="font-size:26px;font-weight:900;color:#00d4ff">{leads}</div></div>'
-                f'    <div><div class="kpi-label">Meta</div><div style="font-size:26px;font-weight:900;color:#e0e4f0">{meta} alunos</div></div>'
-                f'    <div><div class="kpi-label">Faltam</div><div style="font-size:26px;font-weight:900;color:#ffd600">{faltam}</div></div>'
-                f'    {cpl_html}'
-                f'  </div>'
-                f'  <div style="background:#161829;border-radius:4px;height:7px;overflow:hidden">'
-                f'    <div style="width:{pct:.1f}%;height:100%;background:{bar_color};border-radius:4px"></div>'
-                f'  </div>'
-                f'  <div style="display:flex;justify-content:space-between;margin-top:6px">'
-                f'    <div style="font-size:10px;color:#3d4466">{leads} leads captados</div>'
-                f'    <div style="font-size:10px;color:#3d4466">Meta: {meta} alunos</div>'
-                f'  </div>'
-                f'</div>',
-                unsafe_allow_html=True
+                f'<div style="font-size:20px;font-weight:900;color:#e0e4f0;margin-bottom:2px">'
+                f'Metas de {_mes_ref.strftime("%B de %Y").capitalize()}</div>'
+                f'<div style="font-size:11px;color:#3d4466;margin-bottom:16px">'
+                f'Dia {_dias_pass} de {_dias_mes} · {_dias_rest} dias restantes</div>',
+                unsafe_allow_html=True,
             )
+            _c1, _c2 = st.columns([2, 1])
+            with _c1:
+                st.markdown(
+                    f'<div style="background:#0f1120;border:1px solid #1e2235;border-radius:12px;padding:20px 24px">'
+                    f'<div style="font-size:12px;font-weight:700;color:#3d4466;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">👤 Pacientes Agendados</div>'
+                    f'<div style="font-size:28px;font-weight:900;color:#e0e4f0;margin-bottom:4px">{pac_atual} <span style="font-size:16px;color:#5a607a">/ {meta_pac}</span></div>'
+                    f'<div style="font-size:11px;color:#3d4466;margin-bottom:12px">faltam <b style="color:{cor_txt}">{faltam}</b> pacientes</div>'
+                    f'<div style="background:#161829;border-radius:4px;height:6px;margin-bottom:12px">'
+                    f'<div style="background:linear-gradient(90deg,#00d4ff,#00e676);height:100%;border-radius:4px;width:{round(pct)}%"></div></div>'
+                    f'<div style="font-size:12px;color:#8892b0">{status}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            with _c2:
+                st.markdown(_kpi_html([
+                    {"label": "Realizado",       "value": f"{pac_atual}/{meta_pac}", "color": "cyan"},
+                    {"label": "Projeção no mês", "value": str(proj),                 "color": "green" if bater else "yellow"},
+                    {"label": "Ritmo atual",     "value": f"{ritmo:.1f}/dia",        "color": "white"},
+                ], cols=1), unsafe_allow_html=True)
+            st.caption("Pacientes agendados = coluna D da 'Planilha agendamento' · mês inteiro do período selecionado")
+
+        else:
+            df_lead_m = df_lead.copy()
+            df_lead_m["lead_count"] = df_lead_m["actions"].apply(
+                lambda x: extract_action(x, "onsite_conversion.lead_grouped")
+                       or extract_action(x, "offsite_conversion.fb_pixel_lead")
+                       or extract_action(x, "lead")
+            )
+            df_lead_m["curso"] = df_lead_m["campaign_name"].apply(
+                lambda n: n.split("|")[-1].strip() if "|" in n else n.strip()
+            )
+            leads_por_curso = (
+                df_lead_m.groupby("curso")
+                .agg(leads=("lead_count", "sum"), spend=("spend", "sum"))
+                .reset_index()
+            )
+
+            st.markdown('<div style="font-size:13px;color:#3d4466;margin-bottom:20px">Leads captados vs meta de alunos · Período selecionado</div>', unsafe_allow_html=True)
+
+            for curso, meta in metas_cursos.items():
+                row = leads_por_curso[leads_por_curso["curso"].str.lower() == curso.lower()]
+                leads = int(row["leads"].sum()) if not row.empty else 0
+                spend = float(row["spend"].sum()) if not row.empty else 0.0
+                pct   = min(leads / meta * 100, 100) if meta > 0 else 0
+                cpl   = spend * TAX_MULTIPLIER / leads if leads > 0 else None
+                faltam = max(meta - leads, 0)
+
+                bar_color = "#00e676" if pct >= 80 else ("#ffd600" if pct >= 50 else "#00d4ff")
+                badge_cls = "up" if pct >= 80 else ("warn" if pct >= 50 else "ok")
+
+                cpl_html = (
+                    f'<div><div class="kpi-label">CPL</div>'
+                    f'<div style="font-size:22px;font-weight:900;color:#a78bfa">{fmt_brl(cpl)}</div></div>'
+                ) if cpl else ""
+
+                st.markdown(
+                    f'<div style="background:#0f1120;border:1px solid #1e2235;border-radius:12px;padding:22px 24px;margin-bottom:14px">'
+                    f'  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+                    f'    <div style="font-size:17px;font-weight:800;color:#e0e4f0">{curso}</div>'
+                    f'    <span class="badge {badge_cls}">{pct:.0f}% da meta</span>'
+                    f'  </div>'
+                    f'  <div style="display:flex;gap:36px;margin-bottom:16px">'
+                    f'    <div><div class="kpi-label">Leads</div><div style="font-size:26px;font-weight:900;color:#00d4ff">{leads}</div></div>'
+                    f'    <div><div class="kpi-label">Meta</div><div style="font-size:26px;font-weight:900;color:#e0e4f0">{meta} alunos</div></div>'
+                    f'    <div><div class="kpi-label">Faltam</div><div style="font-size:26px;font-weight:900;color:#ffd600">{faltam}</div></div>'
+                    f'    {cpl_html}'
+                    f'  </div>'
+                    f'  <div style="background:#161829;border-radius:4px;height:7px;overflow:hidden">'
+                    f'    <div style="width:{pct:.1f}%;height:100%;background:{bar_color};border-radius:4px"></div>'
+                    f'  </div>'
+                    f'  <div style="display:flex;justify-content:space-between;margin-top:6px">'
+                    f'    <div style="font-size:10px;color:#3d4466">{leads} leads captados</div>'
+                    f'    <div style="font-size:10px;color:#3d4466">Meta: {meta} alunos</div>'
+                    f'  </div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
 
 # ══ TAB 2 — SEGUIDORES ════════════════════════════════════════════════════════
 
