@@ -121,6 +121,8 @@ CLIENTS = {
         "account_id": "act_1007230201772374",
         "spreadsheet_id": None,
         "agendamentos_id": None,
+        # Planilha preenchida manualmente pela clínica (D=Agendamentos, F=Valor Total)
+        "agendamentos_mb_id": "1jZMxkHeiLAwU3A-hR8Bs5zz6JT7nfap1u-BdR9xIJdY",
         "tipo": "mensagens_lead",
         "msg_keywords":  ["ENGJ"],
         "lead_keywords": ["LEAD"],
@@ -856,6 +858,55 @@ def fetch_agendamentos(spreadsheet_id: str, date_start: str, date_end: str) -> p
     df = df[(df["dt"] >= ds) & (df["dt"] <= de)]
     return df
 
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def fetch_agendamentos_mb(spreadsheet_id: str, date_start: str, date_end: str) -> pd.DataFrame:
+    """Lê a planilha manual da clínica (aba 'Planilha agendamento'):
+    A=Data, D=Agendamentos Confirmados, F=Valor Total Consulta."""
+    _empty = ["data", "agendamentos", "valor_total"]
+    try:
+        rows = _read_sheets_range(spreadsheet_id, "'Planilha agendamento'!A2:F400")
+    except Exception as e:
+        raise RuntimeError(f"Erro ao ler agendamentos: {e}") from e
+    if not rows:
+        return pd.DataFrame(columns=_empty)
+
+    def parse_brl(val):
+        if not val or val in ("", None):
+            return 0.0
+        try:
+            return float(str(val).replace("R$", "").replace(".", "").replace(",", ".").strip() or 0)
+        except (ValueError, TypeError):
+            return 0.0
+    def parse_num(val):
+        if not val or val in ("", None):
+            return 0
+        try:
+            return int(float(str(val).replace(",", ".")))
+        except (ValueError, TypeError):
+            return 0
+
+    records = []
+    for row in rows:
+        if not row or not row[0]:
+            continue
+        records.append({
+            "data":         row[0],
+            "agendamentos": parse_num(row[3]) if len(row) > 3 else 0,
+            "valor_total":  parse_brl(row[5]) if len(row) > 5 else 0.0,
+        })
+
+    df = pd.DataFrame(records)
+    if df.empty:
+        return df
+    ds = pd.to_datetime(date_start)
+    de = pd.to_datetime(date_end)
+    df["dt"] = pd.to_datetime(df["data"] + f"/{ds.year}", format="%d/%m/%Y", errors="coerce")
+    df = df.dropna(subset=["dt"])
+    df = df[(df["dt"] >= ds) & (df["dt"] <= de)]
+    return df
+
+
 with st.spinner("Buscando dados..."):
     df = fetch_campaign_insights(str(date_start), str(date_end), account_id)
     if spreadsheet_id:
@@ -871,6 +922,15 @@ with st.spinner("Buscando dados..."):
     except RuntimeError as _e:
         st.warning(f"⚠️ {_e} — clique em **Atualizar Dados** na barra lateral para tentar novamente.")
         df_agend = pd.DataFrame()
+    _agmb_id = client_cfg.get("agendamentos_mb_id")
+    if _agmb_id:
+        try:
+            df_agend_mb = fetch_agendamentos_mb(_agmb_id, str(date_start), str(date_end))
+        except RuntimeError as _e:
+            st.warning(f"⚠️ {_e} — clique em **Atualizar Dados** na barra lateral para tentar novamente.")
+            df_agend_mb = pd.DataFrame(columns=["data", "agendamentos", "valor_total"])
+    else:
+        df_agend_mb = pd.DataFrame(columns=["data", "agendamentos", "valor_total"])
 
 st.caption(f"Última atualização: {datetime.now().strftime('%d/%m/%Y às %H:%M')} · Cache renova a cada 2h")
 
@@ -905,27 +965,72 @@ _tipo_cliente = client_cfg.get("tipo", "clinica_geral")
 
 if _tipo_cliente == "mensagens":
     tab1, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📈 Evolução"])
-    tab2 = tab3 = tab4 = tab_lead = tab_metas = tab_funil = None
+    tab2 = tab3 = tab4 = tab_lead = tab_metas = tab_funil = tab_agend = None
 elif _tipo_cliente == "mensagens_lead":
     _has_metas = bool(client_cfg.get("metas_cursos"))
+    _has_agend = bool(client_cfg.get("agendamentos_mb_id"))
+    _msg_lbl   = "💬 Mensagens · ENGJ" if client_cfg.get("leads_first", False) else "💬 Mensagens · E2-CAP"
+    _specs = []
     if client_cfg.get("leads_first", False):
-        if _has_metas:
-            tab_lead, tab1, tab_funil, tab_metas, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "📊 Funil Completo", "🎯 Metas", "📈 Evolução"])
-        else:
-            tab_lead, tab1, tab_funil, tab5 = st.tabs(["📋 Formulários · LEAD", "💬 Mensagens · ENGJ", "📊 Funil Completo", "📈 Evolução"])
-            tab_metas = None
+        _specs += [("lead", "📋 Formulários · LEAD"), ("msg", _msg_lbl)]
     else:
-        if _has_metas:
-            tab1, tab_lead, tab_funil, tab_metas, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "📊 Funil Completo", "🎯 Metas", "📈 Evolução"])
-        else:
-            tab1, tab_lead, tab_funil, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "📋 Formulários · LEAD", "📊 Funil Completo", "📈 Evolução"])
-            tab_metas = None
+        _specs += [("msg", _msg_lbl), ("lead", "📋 Formulários · LEAD")]
+    _specs.append(("funil", "📊 Funil Completo"))
+    if _has_metas:
+        _specs.append(("metas", "🎯 Metas"))
+    if _has_agend:
+        _specs.append(("agend", "🗓️ Agendamentos"))
+    _specs.append(("evol", "📈 Evolução"))
+    _tabmap = {key: t for (key, _), t in zip(_specs, st.tabs([lbl for _, lbl in _specs]))}
+    tab_lead  = _tabmap.get("lead")
+    tab1      = _tabmap.get("msg")
+    tab_funil = _tabmap.get("funil")
+    tab_metas = _tabmap.get("metas")
+    tab_agend = _tabmap.get("agend")
+    tab5      = _tabmap.get("evol")
     tab2 = tab3 = tab4 = None
 else:
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 Mensagens · E2-CAP", "👥 Seguidores · E1-DIST", "📊 Funil Completo", "🎯 Metas", "📈 Evolução"])
     tab_lead = None
     tab_metas = None
     tab_funil = None
+    tab_agend = None
+
+# ══ TAB AGENDAMENTOS — planilha manual da clínica (D=agendamentos, F=valor) ═══
+
+if tab_agend is not None:
+    with tab_agend:
+        _ag_total = int(df_agend_mb["agendamentos"].sum()) if not df_agend_mb.empty else 0
+        _ag_valor = float(df_agend_mb["valor_total"].sum()) if not df_agend_mb.empty else 0.0
+        if _ag_total == 0 and _ag_valor == 0:
+            st.info("Nenhum agendamento preenchido na planilha para o período selecionado.")
+        else:
+            _ticket = _ag_valor / _ag_total if _ag_total > 0 else None
+            _invest_ag = (df_msg["spend"].sum() + df_lead["spend"].sum()) * TAX_MULTIPLIER
+            _custo_ag = _invest_ag / _ag_total if _ag_total > 0 else None
+
+            st.markdown(_kpi_html([
+                {"label": "Pacientes Agendados",  "value": fmt_num(_ag_total),   "color": "green"},
+                {"label": "Valor Total",          "value": fmt_brl(_ag_valor),   "color": "cyan"},
+                {"label": "Ticket Médio",         "value": fmt_brl(_ticket) if _ticket else "—",   "color": "white"},
+                {"label": "Custo por Agendamento","value": fmt_brl(_custo_ag) if _custo_ag else "—", "color": "yellow"},
+            ], cols=4), unsafe_allow_html=True)
+            st.divider()
+
+            _daily = df_agend_mb[(df_agend_mb["agendamentos"] > 0) | (df_agend_mb["valor_total"] > 0)].sort_values("dt")
+            _rows = "".join(
+                f"<tr><td style='color:#c8cfe0;font-weight:600'>{r['dt'].strftime('%d/%m')}</td>"
+                f"<td class='bold'>{int(r['agendamentos'])}</td>"
+                f"<td class='green'>{fmt_brl(r['valor_total'])}</td></tr>"
+                for _, r in _daily.iterrows()
+            )
+            st.markdown(
+                "<div class='tbl-wrap'><table><thead><tr>"
+                "<th>DIA</th><th>AGENDAMENTOS</th><th>VALOR TOTAL</th>"
+                f"</tr></thead><tbody>{_rows}</tbody></table></div>",
+                unsafe_allow_html=True,
+            )
+            st.caption("Preenchido manualmente pela clínica · aba 'Planilha agendamento' (colunas D e F)")
 
 # ══ TAB 1 — MENSAGENS ═════════════════════════════════════════════════════════
 
